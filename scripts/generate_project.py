@@ -8,7 +8,7 @@ import urllib.request, urllib.error
 sys.path.insert(0, os.path.dirname(__file__))
 from projects_registry import get_project
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 SYSTEM_PROMPT = """You are an expert AI/ML engineer creating a world-class educational
 GitHub repository about AI in software development.
