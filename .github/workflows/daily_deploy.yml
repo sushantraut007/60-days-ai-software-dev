@@ -1,1 +1,70 @@
 
+name: Daily AI Project Deploy (GitHub Models)
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      day_override:
+        description: 'Force a specific day (1-60). Leave blank for auto.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-project:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install openai python-dateutil requests
+
+      - name: Calculate today's day number
+        id: daynum
+        run: python3 scripts/calculate_day.py
+        env:
+          DAY_OVERRIDE:       ${{ github.event.inputs.day_override }}
+          PROJECT_START_DATE: ${{ vars.PROJECT_START_DATE }}
+
+      - name: Generate project with GitHub Models
+        run: python3 scripts/generate_project.py
+        env:
+          GITHUB_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+          DAY_NUMBER:    ${{ steps.daynum.outputs.day_number }}
+          PROJECT_TITLE: ${{ steps.daynum.outputs.project_title }}
+          PROJECT_PHASE: ${{ steps.daynum.outputs.project_phase }}
+
+      - name: Commit new project folder
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --staged --quiet || git commit -m "Day ${{ steps.daynum.outputs.day_number }}: ${{ steps.daynum.outputs.project_title }}"
+          git push
+
+      - name: Update progress tracker
+        run: python3 scripts/update_tracker.py
+        env:
+          DAY_NUMBER:    ${{ steps.daynum.outputs.day_number }}
+          PROJECT_TITLE: ${{ steps.daynum.outputs.project_title }}
+          PROJECT_PHASE: ${{ steps.daynum.outputs.project_phase }}
+
+      - name: Commit tracker update
+        run: |
+          git add README.md PROGRESS.md
+          git diff --staged --quiet || git commit -m "chore: progress tracker — Day ${{ steps.daynum.outputs.day_number }}"
+          git push
