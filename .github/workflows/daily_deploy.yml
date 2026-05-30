@@ -47,6 +47,7 @@ jobs:
           DAY_NUMBER:    ${{ steps.daynum.outputs.day_number }}
           PROJECT_TITLE: ${{ steps.daynum.outputs.project_title }}
           PROJECT_PHASE: ${{ steps.daynum.outputs.project_phase }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Commit new project folder
         run: |
