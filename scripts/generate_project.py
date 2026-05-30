@@ -3,7 +3,7 @@ Generate a complete project using Google Gemini API — 100% free.
 Free tier: 1,500 requests/day, no credit card needed.
 """
 
-import os, sys, json, re
+import os, sys, json, re, time
 import urllib.request, urllib.error
 sys.path.insert(0, os.path.dirname(__file__))
 from projects_registry import get_project
@@ -49,17 +49,39 @@ def call_gemini(prompt: str) -> str:
         }
     }).encode("utf-8")
 
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
+    for attempt in range(5):
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = 30 * (attempt + 1)
+                print(f"Rate limited (429), waiting {wait}s before retry {attempt + 1}/5...")
+                time.sleep(wait)
+            elif e.code == 503:
+                wait = 20 * (attempt + 1)
+                print(f"Service unavailable (503), waiting {wait}s before retry {attempt + 1}/5...")
+                time.sleep(wait)
+            else:
+                body = e.read().decode("utf-8", errors="ignore")
+                print(f"HTTP {e.code} error: {body}")
+                raise
+        except Exception as e:
+            print(f"Unexpected error on attempt {attempt + 1}: {e}")
+            if attempt < 4:
+                time.sleep(15)
+            else:
+                raise
 
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    raise RuntimeError("Gemini API failed after 5 retries")
 
-    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def generate(day: int, title: str, phase: str) -> dict:
     project = get_project(day)
@@ -82,10 +104,17 @@ Make the README the best educational resource on this topic. All code must actua
     print(f"Calling Gemini for Day {day}: {title}...")
     raw = call_gemini(prompt).strip()
 
-    # Strip markdown fences if model adds them
+    # Strip markdown fences if model wraps response in them
     raw = re.sub(r"^```(?:json)?\n?", "", raw)
     raw = re.sub(r"\n?```$", "", raw)
-    return json.loads(raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"JSON parse error: {e}")
+        print(f"Raw response (first 500 chars): {raw[:500]}")
+        raise
+
 
 def write_files(day: int, title: str, phase: str, data: dict) -> str:
     slug   = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
@@ -120,6 +149,7 @@ def write_files(day: int, title: str, phase: str, data: dict) -> str:
         json.dump(meta, f, indent=2)
 
     return folder
+
 
 def main():
     day   = int(os.environ["DAY_NUMBER"])
