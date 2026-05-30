@@ -1,88 +1,90 @@
 """
-Generate a complete project using GitHub Models — 100% free.
-GitHub Models uses the OpenAI-compatible API endpoint with your GITHUB_TOKEN.
-No extra API key needed — GITHUB_TOKEN is injected automatically in Actions.
+Generate a complete project using Google Gemini API — 100% free.
+Free tier: 1,500 requests/day, no credit card needed.
 """
 
 import os, sys, json, re
+import urllib.request, urllib.error
 sys.path.insert(0, os.path.dirname(__file__))
 from projects_registry import get_project
-from openai import OpenAI
 
-# GitHub Models endpoint — free with any GitHub account
-GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com"
-# Best free model available on GitHub Models as of 2025
-MODEL = "gpt-4o"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 SYSTEM_PROMPT = """You are an expert AI/ML engineer creating a world-class educational
 GitHub repository about AI in software development.
 
-Generate a COMPLETE, production-quality project package. Output ONLY valid JSON — no
-markdown fences, no preamble, nothing outside the JSON object.
+Generate a COMPLETE, production-quality project package.
+Output ONLY valid JSON — no markdown fences, no preamble, nothing outside the JSON.
 
 Required JSON schema:
 {
-  "readme": "full markdown README — include: Problem, Solution, Architecture, Setup, Usage, Code walkthrough, Key concepts, Extensions",
+  "readme": "full markdown README with: Problem, Solution, Architecture, Setup, Usage, Code walkthrough, Key concepts, Extensions",
   "main_code": "complete working Python code with comments explaining every AI/ML concept",
   "test_code": "pytest tests covering normal, edge, and error cases",
   "requirements": "requirements.txt content",
   "env_example": ".env.example with all required environment variables",
-  "dockerfile": "Dockerfile (omit field if not applicable)",
-  "extra_files": [{"filename": "utils.py", "content": "..."} ],
+  "dockerfile": "Dockerfile content or empty string if not needed",
+  "extra_files": [{"filename": "utils.py", "content": "..."}],
   "concepts_summary": "2-3 sentence summary of AI concepts covered"
 }
 
-Code requirements:
-- Fully working (not pseudocode)
-- Proper error handling and logging
-- Secrets via environment variables only
-- Well-commented, explaining AI/ML concepts inline
-- PEP8 compliant"""
+Code must be fully working, not pseudocode. PEP8 compliant. Secrets via env vars only."""
 
 PHASE_CONTEXT = {
-    "beginner":     "Explain every concept from scratch. Extensive inline comments. Keep code simple and readable.",
-    "intermediate": "Show real production patterns. Discuss architecture trade-offs. Assume Python knowledge.",
-    "advanced":     "Production-grade code with performance considerations, monitoring, and scaling notes.",
-    "expert":       "Cutting-edge techniques. Reference relevant research. System-design thinking throughout.",
+    "beginner":     "Explain every concept from scratch. Extensive inline comments. Keep code simple.",
+    "intermediate": "Show real production patterns. Discuss trade-offs. Assume Python knowledge.",
+    "advanced":     "Production-grade code with performance, monitoring, and scaling notes.",
+    "expert":       "Cutting-edge techniques. Reference research where relevant. System-design thinking.",
 }
+
+def call_gemini(prompt: str) -> str:
+    api_key = os.environ["GEMINI_API_KEY"]
+    url = f"{GEMINI_API_URL}?key={api_key}"
+
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 8192,
+        }
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def generate(day: int, title: str, phase: str) -> dict:
     project = get_project(day)
-    client  = OpenAI(
-        base_url=GITHUB_MODELS_ENDPOINT,
-        api_key=os.environ["GITHUB_TOKEN"],   # free — auto-injected by GitHub Actions
-    )
 
-    prompt = f"""Generate a complete project for:
+    prompt = f"""{SYSTEM_PROMPT}
 
-DAY: {day}/60  
+Generate a complete project for:
+
+DAY: {day}/60
 TITLE: {title}
 PHASE: {phase.upper()} — {PHASE_CONTEXT.get(phase, '')}
 TAGS: {', '.join(project['tags'])}
 DESCRIPTION: {project['desc']}
 
-Context: This is part of a 60-day AI in software development curriculum.
-Days 1-14 = beginner basics | Days 15-35 = intermediate patterns |
-Days 36-50 = advanced production | Days 51-60 = expert systems.
+Context: 60-day AI in software development curriculum.
+Days 1-14 = beginner | Days 15-35 = intermediate | Days 36-50 = advanced | Days 51-60 = expert.
 
-Make the README the best educational resource on this topic on the internet.
-All code must actually run."""
+Make the README the best educational resource on this topic. All code must actually run."""
 
-    print(f"Calling GitHub Models ({MODEL}) for Day {day}: {title}...")
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": prompt},
-        ],
-        temperature=0.3,
-        max_tokens=8000,
-    )
+    print(f"Calling Gemini for Day {day}: {title}...")
+    raw = call_gemini(prompt).strip()
 
-    raw = response.choices[0].message.content.strip()
     # Strip markdown fences if model adds them
     raw = re.sub(r"^```(?:json)?\n?", "", raw)
-    raw = re.sub(r"\n?```$",          "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
     return json.loads(raw)
 
 def write_files(day: int, title: str, phase: str, data: dict) -> str:
@@ -102,24 +104,20 @@ def write_files(day: int, title: str, phase: str, data: dict) -> str:
 
     for name, content in files.items():
         if content:
-            path = os.path.join(folder, name)
-            with open(path, "w", encoding="utf-8") as f:
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
                 f.write(content)
-            print(f"  wrote {path}")
+            print(f"  wrote {folder}/{name}")
 
     for extra in data.get("extra_files", []):
         if extra.get("filename") and extra.get("content"):
-            path = os.path.join(folder, extra["filename"])
-            with open(path, "w", encoding="utf-8") as f:
+            with open(os.path.join(folder, extra["filename"]), "w", encoding="utf-8") as f:
                 f.write(extra["content"])
-            print(f"  wrote {path}")
+            print(f"  wrote {folder}/{extra['filename']}")
 
-    # Metadata for tracker
-    import json as _json
     meta = {"day": day, "title": title, "phase": phase,
             "folder": folder, "concepts": data.get("concepts_summary", "")}
     with open(os.path.join(folder, "meta.json"), "w") as f:
-        _json.dump(meta, f, indent=2)
+        json.dump(meta, f, indent=2)
 
     return folder
 
